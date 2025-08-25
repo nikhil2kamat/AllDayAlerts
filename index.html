@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Daily Alerts Dashboard — V3</title>
+<!-- Force links to open in a new tab by default -->
+<base target="_blank">
+<style>
+  :root{--bg:#f7fafc;--card:#fff;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--brand:#2563eb;--warn:#ef4444;--ok:#16a34a}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+  .container{max-width:1040px;margin:0 auto;padding:20px}
+  h1{margin:0 0 6px;font-size:26px}
+  .muted{color:var(--muted)}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .btn{border:1px solid var(--line);background:#fff;border-radius:12px;padding:8px 12px;cursor:pointer}
+  .btn.brand{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .btn.danger{color:#fff;background:var(--warn);border-color:var(--warn)}
+  .btn.ghost{background:transparent}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px}
+  .grid{display:grid;gap:12px}
+  .grid.cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .stat{padding:12px;border:1px solid var(--line);border-radius:12px;background:#fff;text-align:center}
+  .stat .n{font-weight:700;font-size:20px}
+  label{display:block;font-weight:600;margin:0 0 6px}
+  input,select,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:12px;background:#fff}
+  table{width:100%;border-collapse:collapse}
+  th,td{border-top:1px solid var(--line);padding:10px;vertical-align:top}
+  th{color:var(--muted);text-align:left}
+  .badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+  .badge{border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-size:12px;color:var(--muted)}
+  .badge.ok{border-color:#bbf7d0;background:#f0fdf4;color:#166534}
+  .badge.warn{border-color:#fecaca;background:#fff1f2;color:#991b1b}
+  .dim{opacity:.6}
+  .help{font-size:12px;color:var(--muted)}
+  .right{margin-left:auto}
+  dialog{border:none;border-radius:16px;padding:0}
+  dialog .card{border:none}
+  a[rel~="noopener"]{ /* visual cue for external */ }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Daily Alerts Dashboard (V3)</h1>
+    <p class="muted">Link‑safe edition. Track 8 AM Watchlist, 12 PM AI, 3 PM Training, 5 PM Indian Example. All data stays in your browser.</p>
+    <div class="row" style="margin:12px 0">
+      <button class="btn" id="btnAdd">＋ Add Alert</button>
+      <button class="btn" id="btnImport">⇪ Import JSON</button>
+      <button class="btn" id="btnExport">⇩ Export CSV</button>
+      <button class="btn" id="btnLoadStarter">★ Load starter</button>
+      <button class="btn danger" id="btnFactoryReset" title="Clears local data">Reset (factory)</button>
+    </div>
+  </header>
+
+  <!-- Sync -->
+  <section class="card" id="syncCard">
+    <h3 style="margin:0 0 10px">🔄 Sync</h3>
+    <div class="grid" style="grid-template-columns:2fr 1fr 1fr auto;align-items:end">
+      <div>
+        <label for="syncUrl">Sync URL (JSON)</label>
+        <input id="syncUrl" type="url" placeholder="https://gist.githubusercontent.com/.../raw/alerts.json">
+        <div class="help">Endpoint must return an array or <code>{"alerts": [...]}</code>. Use a public GitHub Gist Raw URL.</div>
+      </div>
+      <div>
+        <label for="syncInterval">Every (minutes)</label>
+        <input id="syncInterval" type="number" min="1" value="15">
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <div class="row" style="align-items:center"><input type="checkbox" id="autoSync"><label for="autoSync" style="margin:0">Auto-sync</label></div>
+        <div class="help" id="lastSync">Last sync: never</div>
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <div class="row"><button class="btn" id="btnSync">Sync now</button></div>
+      </div>
+    </div>
+    <div class="help" id="syncMsg" style="margin-top:6px"></div>
+  </section>
+
+  <!-- Stats -->
+  <section class="grid cols-4" style="margin:12px 0">
+    <div class="stat"><div class="muted">Open</div><div class="n" id="stOpen">0</div></div>
+    <div class="stat"><div class="muted">Unread</div><div class="n" id="stUnread">0</div></div>
+    <div class="stat"><div class="muted">Snoozed</div><div class="n" id="stSnoozed">0</div></div>
+    <div class="stat"><div class="muted">Total</div><div class="n" id="stTotal">0</div></div>
+  </section>
+
+  <!-- Filters -->
+  <section class="card">
+    <div class="row">
+      <input id="q" placeholder="Search title, notes, source, tags…" class="right"/>
+      <select id="cat">
+        <option value="all">All categories</option>
+        <option value="8am">8:00 • Watchlist News</option>
+        <option value="12pm">12:00 • AI Digest</option>
+        <option value="3pm">3:00 • Valuation Training</option>
+        <option value="5pm">5:00 • Indian Example</option>
+        <option value="other">Other</option>
+      </select>
+      <label class="row" style="align-items:center"><input type="checkbox" id="onlyOpen" checked> Show open only</label>
+    </div>
+  </section>
+
+  <!-- Table -->
+  <section class="card" style="margin-top:12px">
+    <div class="help" style="margin-bottom:6px">Titles only become clickable for <b>absolute URLs</b> (https://, http://, //, www.). This prevents accidental repo-path links on GitHub Pages.</div>
+    <table>
+      <thead><tr><th style="width:170px">Time</th><th>Title</th><th style="width:140px">Source</th><th style="width:180px">Tags</th><th style="width:120px">Details</th><th style="width:180px">Actions</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </section>
+</div>
+
+<!-- Add/Edit -->
+<dialog id="dlgEdit"><form method="dialog" class="card" style="min-width:min(620px,95vw)">
+  <h3 style="margin:0 0 10px">Add alert</h3>
+  <div class="grid" style="grid-template-columns:1fr;gap:10px">
+    <div><label>Title *</label><input id="f_title" required></div>
+    <div><label>Link</label><input id="f_link" placeholder="https://…"></div>
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+      <div><label>Category</label>
+        <select id="f_cat"><option value="8am">8am</option><option value="12pm">12pm</option><option value="3pm">3pm</option><option value="5pm">5pm</option><option value="other">other</option></select>
+      </div>
+      <div><label>When</label><input id="f_time" type="datetime-local"></div>
+    </div>
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+      <div><label>Status</label>
+        <select id="f_status"><option>new</option><option>read</option><option>snoozed</option><option>done</option></select>
+      </div>
+      <div><label>Priority</label>
+        <select id="f_pri"><option>high</option><option selected>med</option><option>low</option></select>
+      </div>
+    </div>
+    <div><label>Source</label><input id="f_src" placeholder="Daily Watchlist Digest"></div>
+    <div><label>Tags (comma separated)</label><input id="f_tags" placeholder="earnings, aviation"></div>
+    <div><label>Notes</label><input id="f_notes"></div>
+  </div>
+  <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" value="cancel">Cancel</button><button class="btn brand" id="btnSave" value="default">Save alert</button></div>
+</form></dialog>
+
+<!-- Import -->
+<dialog id="dlgImport"><form method="dialog" class="card" style="min-width:min(620px,95vw)">
+  <h3 style="margin:0 0 8px">Import alerts (JSON)</h3>
+  <p class="help">Paste an array or an object like <code>{"alerts":[...]}</code>.</p>
+  <textarea id="importText" rows="12" placeholder='{"alerts":[{"title":"Example","time":"2025-08-25T08:00:00+05:30","category":"8am","status":"new","priority":"high","source":"Watchlist","link":"https://…","tags":["earnings"],"notes":"Check guidance"}]}'></textarea>
+  <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" value="cancel">Cancel</button><button class="btn brand" id="btnDoImport" value="default">Import</button></div>
+</form></dialog>
+
+<!-- Details viewer -->
+<dialog id="dlgDetails"><div class="card" style="min-width:min(680px,95vw)">
+  <h3 style="margin:0 0 8px" id="d_title">Details</h3>
+  <div class="grid" style="grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+    <div><div class="help">Time</div><div id="d_time">—</div></div>
+    <div><div class="help">Category</div><div id="d_category">—</div></div>
+    <div><div class="help">Status</div><div id="d_status">—</div></div>
+    <div><div class="help">Priority</div><div id="d_priority">—</div></div>
+    <div><div class="help">Source</div><div id="d_source">—</div></div>
+    <div><div class="help">Link</div><div id="d_link">—</div></div>
+  </div>
+  <div style="margin-bottom:8px"><div class="help">Tags</div><div id="d_tags" class="badges"></div></div>
+  <div style="margin-bottom:8px"><div class="help">Notes</div><div id="d_notes">—</div></div>
+  <div class="row" style="justify-content:flex-end"><button class="btn" onclick="this.closest('dialog').close()">Close</button></div>
+</div></dialog>
+
+<script>
+(function(){
+  const STORAGE_KEY='alerts_dashboard_v3';
+  const SYNC_URL_KEY='alerts_sync_url';
+  const AUTO_KEY='alerts_auto_sync';
+  const INTERVAL_KEY='alerts_sync_interval';
+  const LAST_KEY='alerts_last_sync';
+
+  let state = load();
+
+  // Elements
+  const rows=document.getElementById('rows');
+  const q=document.getElementById('q');
+  const cat=document.getElementById('cat');
+  const onlyOpen=document.getElementById('onlyOpen');
+  const stOpen=document.getElementById('stOpen');
+  const stUnread=document.getElementById('stUnread');
+  const stSnoozed=document.getElementById('stSnoozed');
+  const stTotal=document.getElementById('stTotal');
+  const syncUrl=document.getElementById('syncUrl');
+  const syncInterval=document.getElementById('syncInterval');
+  const autoSync=document.getElementById('autoSync');
+  const btnSync=document.getElementById('btnSync');
+  const lastSync=document.getElementById('lastSync');
+  const syncMsg=document.getElementById('syncMsg');
+  const btnAdd=document.getElementById('btnAdd');
+  const btnImport=document.getElementById('btnImport');
+  const btnExport=document.getElementById('btnExport');
+  const btnLoadStarter=document.getElementById('btnLoadStarter');
+  const btnFactoryReset=document.getElementById('btnFactoryReset');
+  const dlgDetails=document.getElementById('dlgDetails');
+  const d={title:document.getElementById('d_title'),time:document.getElementById('d_time'),category:document.getElementById('d_category'),status:document.getElementById('d_status'),priority:document.getElementById('d_priority'),source:document.getElementById('d_source'),link:document.getElementById('d_link'),tags:document.getElementById('d_tags'),notes:document.getElementById('d_notes')};
+
+  const dlgEdit=document.getElementById('dlgEdit');
+  const dlgImport=document.getElementById('dlgImport');
+  const f={title:document.getElementById('f_title'),link:document.getElementById('f_link'),cat:document.getElementById('f_cat'),time:document.getElementById('f_time'),status:document.getElementById('f_status'),pri:document.getElementById('f_pri'),src:document.getElementById('f_src'),tags:document.getElementById('f_tags'),notes:document.getElementById('f_notes')};
+
+  // Init sync settings
+  syncUrl.value=localStorage.getItem(SYNC_URL_KEY)||'';
+  autoSync.checked=localStorage.getItem(AUTO_KEY)==='true';
+  syncInterval.value=Number(localStorage.getItem(INTERVAL_KEY))||15;
+  updateLast();
+
+  // Render
+  function render(){
+    save();
+    const query=(q.value||'').toLowerCase();
+    const category=cat.value;
+    const openOnly=onlyOpen.checked;
+
+    const filtered = state.alerts
+      .filter(a=> category==='all' ? true : a.category===category)
+      .filter(a=> !query ? true : [a.title,a.source,a.notes,(a.tags||[]).join(' ')].join(' ').toLowerCase().includes(query))
+      .filter(a=> openOnly ? a.status!=='done' : true)
+      .sort((a,b)=> new Date(b.time)-new Date(a.time));
+
+    // stats
+    stTotal.textContent=state.alerts.length;
+    stOpen.textContent=state.alerts.filter(a=>a.status!=='done').length;
+    stUnread.textContent=state.alerts.filter(a=>a.status==='new').length;
+    stSnoozed.textContent=state.alerts.filter(a=>a.status==='snoozed').length;
+
+    rows.innerHTML='';
+    if(filtered.length===0){ const tr=document.createElement('tr'); const td=document.createElement('td'); td.colSpan=4; td.className='muted'; td.textContent='No alerts found.'; tr.appendChild(td); rows.appendChild(tr); return; }
+
+    for(const a of filtered){
+      const tr=document.createElement('tr'); if(a.status==='done') tr.classList.add('dim');
+      const tdTime=document.createElement('td'); tdTime.innerHTML=`<div>${fmt(a.time)}</div><div class="badges"><span class="badge">${label(a.category)}</span><span class="badge">${a.priority||''}</span><span class="badge">${a.status||''}</span></div>`;
+
+      const tdTitle=document.createElement('td');
+      const link = normalizeAbsolute(a.link);
+      if(link){
+        const el=document.createElement('a'); el.textContent=a.title; el.href=link; el.rel='noopener noreferrer'; // base target=_blank handles new tab
+        tdTitle.appendChild(el);
+      } else {
+        const span=document.createElement('span'); span.textContent=a.title; tdTitle.appendChild(span);
+        const warn=document.createElement('span'); warn.className='badge warn'; warn.style.marginLeft='6px'; warn.textContent='invalid / relative link'; tdTitle.appendChild(warn);
+      }
+      if(a.notes){ const p=document.createElement('div'); p.className='help'; p.textContent=a.notes; tdTitle.appendChild(p); }
+
+      const tdSrc=document.createElement('td'); tdSrc.textContent=a.source||'—';
+      const tdTags=document.createElement('td');
+      const tagWrap=document.createElement('div'); tagWrap.className='badges';
+      (a.tags||[]).forEach(t=>{ const b=document.createElement('span'); b.className='badge'; b.textContent=t; tagWrap.appendChild(b); });
+      if((a.tags||[]).length===0){ const b=document.createElement('span'); b.className='badge'; b.textContent='—'; tagWrap.appendChild(b); }
+      tdTags.appendChild(tagWrap);
+
+      const tdDet=document.createElement('td');
+      const view=btn('View',()=>openDetails(a)); tdDet.appendChild(view);
+
+      const tdAct=document.createElement('td');
+      tdAct.appendChild(btn('Mark read',()=>setStatus(a.id,'read')));
+      tdAct.appendChild(btn('Snooze',()=>setStatus(a.id,'snoozed')));
+      tdAct.appendChild(btn('Done',()=>toggleDone(a.id)));
+      const del=btn('Delete',()=>removeAlert(a.id)); del.classList.add('danger'); tdAct.appendChild(del);
+      tr.appendChild(tdTime); tr.appendChild(tdTitle); tr.appendChild(tdSrc); tr.appendChild(tdTags); tr.appendChild(tdDet); tr.appendChild(tdAct);
+      rows.appendChild(tr);
+    }
+  }
+
+  function btn(label,cb){ const b=document.createElement('button'); b.className='btn'; b.textContent=label; b.addEventListener('click',cb); return b; }
+  function label(cat){ return ({'8am':'8:00 • Watchlist News','12pm':'12:00 • AI Digest','3pm':'3:00 • Valuation Training','5pm':'5:00 • Indian Example','other':'Other'})[cat]||cat; }
+  function fmt(ts){ try{return new Date(ts).toLocaleString()}catch{return ts} }
+
+  // ABSOLUTE‑ONLY normalizer to avoid GitHub Pages relative path traps
+  function normalizeAbsolute(u){
+    if(!u) return '';
+    u = String(u).trim();
+    if(/^https?:\/\//i.test(u)) return u;        // absolute OK
+    if(/^www\./i.test(u)) return 'https://'+u;    // fix bare www
+    if(/^\/\//.test(u)) return 'https:'+u;        // protocol‑relative
+    return ''; // anything else is treated as invalid (prevents repo path)
+  }
+
+  // CRUD
+  function addAlert(a){ state.alerts.unshift(a); render(); }
+  function setStatus(id,status){ state.alerts=state.alerts.map(x=>x.id===id?{...x,status}:x); render(); }
+  function toggleDone(id){ state.alerts=state.alerts.map(x=>x.id===id?{...x,status:x.status==='done'?'read':'done'}:x); render(); }
+  function removeAlert(id){ state.alerts=state.alerts.filter(x=>x.id!==id); render(); }
+
+  // Storage
+  function load(){ try{const raw=localStorage.getItem(STORAGE_KEY); if(raw) return JSON.parse(raw);}catch{} return {alerts:starter()}; }
+  function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+  function reset(){ localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(SYNC_URL_KEY); localStorage.removeItem(AUTO_KEY); localStorage.removeItem(INTERVAL_KEY); localStorage.removeItem(LAST_KEY); state={alerts:starter()}; syncUrl.value=''; autoSync.checked=false; syncInterval.value=15; updateLast(); render(); }
+
+  // Starter data
+  function starter(){ const d=new Date().toISOString().slice(0,10); return [
+    {id:uid(), title:'IndiGo Q1 FY26 results: PAT ₹2,176 cr; revenue +5%', link:'https://www.goindigo.in/content/dam/goindigo/investor-relations/Financial%20Results/2025-26/q1_apr_to_jun_2025/Q1FY26-Financial-Results.pdf', category:'8am', source:'Daily Watchlist Digest', time:`${d}T08:00:00+05:30`, status:'new', priority:'med', notes:'Official results PDF', tags:['earnings','aviation']},
+    {id:uid(), title:'AI: TabPFN & AnoLLM — LLMs for tabular data', link:'https://taktile.com/blog/tabpfn-llm-tabular', category:'12pm', source:'AI Noon Digest', time:`${d}T12:00:00+05:30`, status:'new', priority:'low', notes:'Skim for procurement analytics idea', tags:['LLM','tabular']},
+    {id:uid(), title:'Concept: Real Options; Metric: Rule of 40', link:'https://www.investopedia.com/terms/r/realoption.asp', category:'3pm', source:'Valuation Training', time:`${d}T15:00:00+05:30`, status:'read', priority:'med', notes:'Recreate example in Excel', tags:['valuation','metric']},
+    {id:uid(), title:'Apply Real Options & Rule of 40 to Bharti Airtel (FY25 example)', link:'https://www.airtel.in/about-bharti/equity/annual-reports', category:'5pm', source:'Indian Example', time:`${d}T17:00:00+05:30`, status:'new', priority:'high', notes:'5G rollout flexibility & margins', tags:['case','telecom']}
+  ]; }
+  function uid(){ return (crypto.randomUUID?crypto.randomUUID():('id-'+Math.random().toString(36).slice(2))); }
+
+  // Import/Export
+  function normalize(list){
+    return list.map(a=>({
+      id:a.id||key(a),
+      title:a.title||'Untitled',
+      link:a.link||'',
+      category:['8am','12pm','3pm','5pm','other'].includes(a.category)?a.category:'other',
+      source:a.source||'Imported',
+      time:a.time||new Date().toISOString(),
+      status:['new','read','snoozed','done'].includes(a.status)?a.status:'new',
+      priority:['high','med','low'].includes(a.priority)?a.priority:'med',
+      notes:a.notes||'',
+      tags:Array.isArray(a.tags)?a.tags:[],
+      sections:Array.isArray(a.sections)?a.sections:[]
+    }));
+  })); }
+  function key(a){ return [a.title,a.time,a.category].join('|'); }
+  function merge(incoming, existing){ const map=new Map(existing.map(x=>[x.id,x])); for(const a of incoming){ if(!map.has(a.id)) map.set(a.id,a); } return Array.from(map.values()).sort((a,b)=>new Date(b.time)-new Date(a.time)); }
+  function exportCSV(){ const header=['time','category','title','source','priority','status','tags','link','notes']; const rows=state.alerts.map(a=>[a.time,a.category,'"'+(a.title||'').replace(/"/g,'""')+'"','"'+(a.source||'').replace(/"/g,'""')+'"',a.priority||'',a.status||'','"'+(a.tags||[]).join(';').replace(/"/g,'""')+'"',a.link||'','"'+(a.notes||'').replace(/"/g,'""')+'"'].join(',')); const csv=[header.join(','),...rows].join('\n'); const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='alerts_'+new Date().toISOString().slice(0,10)+'.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
+
+  // Sync
+  async function fetchSync(){ const url=(syncUrl.value||'').trim(); if(!url) return; try{ btnSync.disabled=true; syncMsg.textContent=''; const res=await fetch(url,{headers:{'cache-control':'no-cache'}}); if(!res.ok) throw new Error('HTTP '+res.status); const data=await res.json(); const list=Array.isArray(data)?data:data.alerts; if(!Array.isArray(list)) throw new Error('JSON must be an array or {alerts:[...]}'); const normalized=normalize(list); state.alerts=merge(normalized,state.alerts); const ts=new Date().toISOString(); localStorage.setItem(LAST_KEY,ts); updateLast(); localStorage.setItem(SYNC_URL_KEY,url); syncMsg.textContent='Synced '+normalized.length+' item(s)'; render(); }catch(e){ syncMsg.textContent='Sync failed: '+(e?.message||e); } finally{ btnSync.disabled=false; }}
+  function updateLast(){ const v=localStorage.getItem(LAST_KEY); lastSync.textContent='Last sync: '+(v?new Date(v).toLocaleString():'never'); }
+  let timer=null; function resetTimer(){ if(timer) clearInterval(timer); if(!autoSync.checked||!syncUrl.value.trim()) return; const ms=Math.max(1,Number(syncInterval.value)||15)*60*1000; timer=setInterval(fetchSync,ms); }
+
+  // Wire
+  q.addEventListener('input',render); cat.addEventListener('change',render); onlyOpen.addEventListener('change',render);
+  btnAdd.addEventListener('click',()=>{ f.title.value=''; f.link.value=''; f.cat.value='8am'; f.time.value=new Date().toISOString().slice(0,16); f.status.value='new'; f.pri.value='med'; f.src.value=''; f.tags.value=''; f.notes.value=''; dlgEdit.showModal(); });
+  document.getElementById('btnSave').addEventListener('click', (e)=>{ e.preventDefault(); const a={ id:uid(), title:f.title.value.trim()||'Untitled alert', link:f.link.value.trim(), category:f.cat.value, time:new Date(f.time.value).toISOString(), status:f.status.value, priority:f.pri.value, source:f.src.value.trim(), notes:f.notes.value.trim(), tags:f.tags.value.split(',').map(x=>x.trim()).filter(Boolean) }; addAlert(a); dlgEdit.close(); });
+  btnImport.addEventListener('click',()=>{ document.getElementById('importText').value=''; dlgImport.showModal(); });
+  document.getElementById('btnDoImport').addEventListener('click',(e)=>{ e.preventDefault(); try{ const parsed=JSON.parse(document.getElementById('importText').value); const list=Array.isArray(parsed)?parsed:parsed.alerts; if(!Array.isArray(list)) throw new Error('Invalid format'); const normalized=normalize(list); state.alerts=merge(normalized,state.alerts); render(); dlgImport.close(); }catch(err){ alert('Import failed: '+(err?.message||err)); }});
+  btnExport.addEventListener('click',exportCSV);
+  btnSync.addEventListener('click',fetchSync); autoSync.addEventListener('change',()=>{ localStorage.setItem(AUTO_KEY, autoSync.checked); resetTimer(); }); syncUrl.addEventListener('change',()=>{ localStorage.setItem(SYNC_URL_KEY, syncUrl.value.trim()); resetTimer(); }); syncInterval.addEventListener('change',()=>{ localStorage.setItem(INTERVAL_KEY, syncInterval.value); resetTimer(); });
+  btnLoadStarter.addEventListener('click',()=>{ state.alerts=starter(); render(); });
+  btnFactoryReset.addEventListener('click',()=>{ if(confirm('This will clear local alerts and settings. Continue?')) reset(); });
+
+  function openDetails(a){
+    d.title.textContent = a.title || '—';
+    d.time.textContent = fmt(a.time);
+    d.category.textContent = label(a.category);
+    d.status.textContent = a.status || '—';
+    d.priority.textContent = a.priority || '—';
+    d.source.textContent = a.source || '—';
+    const link = normalizeAbsolute(a.link);
+    d.link.innerHTML = link ? `<a href="${link}" rel="noopener noreferrer">${link}</a>` : '—';
+    d.tags.innerHTML = '';
+    if((a.tags||[]).length){ (a.tags||[]).forEach(t=>{ const b=document.createElement('span'); b.className='badge'; b.textContent=t; d.tags.appendChild(b); }); }
+    else { const b=document.createElement('span'); b.className='badge'; b.textContent='—'; d.tags.appendChild(b); }
+    d.notes.textContent = a.notes || '—';
+
+    // --- Sections support ---
+    // Create a container just after notes if it doesn't exist in the dialog markup
+    let secHost = document.getElementById('d_sections');
+    if(!secHost){
+      secHost = document.createElement('div');
+      secHost.id = 'd_sections';
+      secHost.style.marginTop = '8px';
+      const labelEl = document.createElement('div'); labelEl.className='help'; labelEl.textContent='Sections';
+      // Insert after notes
+      const notesEl = document.getElementById('d_notes');
+      const parent = notesEl ? notesEl.parentElement.parentElement || notesEl.parentElement : null;
+      if(parent){ parent.appendChild(labelEl); parent.appendChild(secHost); }
+    }
+    secHost.innerHTML = '';
+
+    const sections = Array.isArray(a.sections) ? a.sections : [];
+    if(!sections.length){
+      const none=document.createElement('div'); none.className='help'; none.textContent='No sections provided.'; secHost.appendChild(none);
+    } else {
+      sections.forEach((s, idx)=>{
+        const wrap=document.createElement('div'); wrap.className='card'; wrap.style.margin='8px 0';
+        const h=document.createElement('div'); h.style.fontWeight='600'; h.style.marginBottom='6px'; h.textContent = s.heading || `Section ${idx+1}`;
+        wrap.appendChild(h);
+        if(s.text){ const body=document.createElement('div'); body.style.whiteSpace='pre-wrap'; body.textContent = s.text; wrap.appendChild(body); }
+        if(Array.isArray(s.bullets) && s.bullets.length){
+          const ul=document.createElement('ul'); ul.style.margin='6px 0 0 18px';
+          s.bullets.forEach(b=>{ const li=document.createElement('li'); li.textContent=b; ul.appendChild(li); });
+          wrap.appendChild(ul);
+        }
+        const links=[]; if(s.link) links.push(s.link); if(Array.isArray(s.links)) links.push(...s.links);
+        if(links.length){
+          const row=document.createElement('div'); row.style.marginTop='8px';
+          links.forEach((L,i)=>{ const abs=normalizeAbsolute(L); if(!abs) return; const aTag=document.createElement('a'); aTag.href=abs; aTag.rel='noopener noreferrer'; aTag.textContent = links.length>1?`Source ${i+1}`:'Source'; aTag.className='btn ghost'; aTag.style.marginRight='6px'; row.appendChild(aTag); });
+          wrap.appendChild(row);
+        }
+        secHost.appendChild(wrap);
+      });
+    }
+
+    dlgDetails.showModal();
+  }" rel="noopener noreferrer">${link}</a>` : '—';
+    d.tags.innerHTML = '';
+    if((a.tags||[]).length){ (a.tags||[]).forEach(t=>{ const b=document.createElement('span'); b.className='badge'; b.textContent=t; d.tags.appendChild(b); }); }
+    else { const b=document.createElement('span'); b.className='badge'; b.textContent='—'; d.tags.appendChild(b); }
+    d.notes.textContent = a.notes || '—';
+    dlgDetails.showModal();
+  }
+
+  // First paint
+  render(); if(autoSync.checked && syncUrl.value.trim()){ fetchSync(); resetTimer(); }
+})();
+</script>
+</body>
+</html>
